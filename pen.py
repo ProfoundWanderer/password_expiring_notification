@@ -3,6 +3,7 @@ from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import logging
+from logging.handlers import RotatingFileHandler
 from ldap3 import Server, Connection, ALL, NTLM
 import os
 import smtplib
@@ -11,6 +12,7 @@ import sys
 
 
 def main():
+    logging.info("AD password expiration notification script (pen.py) has started.")
     office_list = ['Bedrock-Dallas', 'Bedrock-Frisco', 'Bedrock-Houston', 'Bedrock-Minnesota', 'Bedrock-Orlando']
     expiring_passwords(setup(), office_list)
     logging.info("AD password expiration notification script (pen.py) has completed.")
@@ -57,6 +59,8 @@ def expiring_passwords(ad, office_list):
                                f"    3. It cannot match any of your past three passwords.\n\n\n"
                                f"If you have any questions, contact IT.")
             send_email(user['mail'].value, expired_subject, expired_message)
+            logging.info(f"User {user['mail'].value} SSO password expired {ldap_to_human_time(ldap_expire_date)}. "
+                         f"Attempting to email them now...")
         elif (
                 user['userAccountControl'].value == 512
                 and any(word in user['distinguishedName'].value for word in office_list)
@@ -83,6 +87,8 @@ def expiring_passwords(ad, office_list):
                                 f"    3. It cannot match any of your past three passwords.\n\n\n"
                                 f"If you have any questions, contact IT.")
             send_email(user['mail'].value, expiring_subject, expiring_message)
+            logging.info(f"User {user['mail'].value} SSO password expires {ldap_to_human_time(ldap_expire_date)}. "
+                         f"Attempting to email them now...")
 
 
 def ldap_to_human_time(ldap_time):
@@ -94,8 +100,20 @@ def ldap_to_unix_time(ldap_time):
     return (ldap_time / 10000000) - 11644473600
 
 
+def log_setup():
+    """
+    Just for a easy reminder so the file doesn't get too large over time.
+    """
+    logging.basicConfig(
+        handlers=[RotatingFileHandler('./pen_log.log', mode='a', maxBytes=1 * 1024 * 1024, backupCount=1, encoding='utf-8', delay=0)],
+        format='%(asctime)s | %(levelname)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        level=logging.INFO,
+    )
+
+
 def setup():
-    logging.info("Setup started.")
+    logging.info("LDAP Setup started.")
     try:
         server = Server(config.server_name, get_info=ALL)
         connect = Connection(
@@ -122,15 +140,14 @@ def setup():
         ],
     )
 
-    logging.info("Setup complete.")
+    logging.info("LDAP setup complete.")
     return connect
 
 
 def send_email(to_address, subject, body):
     """
-    This does the final formatting of the email
+    This does the actual sending of the emails
     """
-    log_size = os.path.getsize('pen.log')  # just for a easy reminder so the file doesn't get too large over time.
 
     print(body)
     print("___________________________________________________________________________________________________________")
@@ -158,17 +175,10 @@ def send_email(to_address, subject, body):
             logging.exception(e)
         finally:
             server.quit()
-            logging.info(f"The log file (pen.log) is {log_size} bytes which is ~{log_size*0.000001:.3f} MB.")
             logging.info("Successfully quit server.")
     """
 
 
 if __name__ == '__main__':
-    logging.basicConfig(
-        format='%(asctime)s | %(levelname)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        filename='pen.log',
-        level=logging.INFO,
-    )
-    logging.info("AD password expiration notification script (pen.py) has started.")
+    log_setup()
     main()
